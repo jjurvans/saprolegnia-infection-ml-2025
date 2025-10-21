@@ -1,5 +1,5 @@
 # saprolegnia-infection-ml-2025
-**Data and machine learning models for studying *Saprolegnia* infection dynamics in Finland (2024–2025).**
+**Data and machine learning models for studying *Saprolegnia* infection dynamics in Enonkoski fish farm, Finland (2024–2025).**
 
 ## Repository structure
 **data**
