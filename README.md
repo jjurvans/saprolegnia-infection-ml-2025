@@ -5,10 +5,12 @@
 **data**
 - `WaterAnalysisRawData.csv` contains 10-minute interval water quality data collected from Enonkoski fish farm surface and bottom layers between March 2024 and August 2025.Parameters include temperature, pH, pH-mV, dissolved oxygen, UV254 (filtered and total), nitrate (NO₃eq, NO₃_Neq), and turbidity. 
 - `WaterAnalysisAggregatedData.csv` is daily mean of all the features from WaterAnalysisRawData.csv except bottom turbidity. Bottom turbidity has statistically significant circadian differences and was thus divided into morning, afternoon, evening and night mean values. The script used is aggregate-water-features-daily.py.
-- `SaprolengiaInfections24_25.csv` fish farm data on timestamped data on fish removal due to extensive saprolengia mold or death due to the saprolengia. Columns are fish species, explanation ("saprolengia" or "other" for working days when no saprolengia was visible), quantity of all fish in a pool, number of removed fish due to saprolengia, pool volume, and timestamp. 
+- `SaprolengiaInfections24_25.csv` fish farm data on timestamped data on fish removal due to extensive saprolengia mold or death due to the saprolengia. Columns are fish species, explanation ("saprolengia" or "other" for working days when no saprolengia was visible), quantity of all fish in a pool, number of removed fish due to saprolengia, pool volume, and timestamp.
+- 'SaprolegniaInfection_LabeledData_2025.csv' combines the feature data from WaterAnalysisAggregatedData.csv and daily infection density (visibly infected fish per pool volume) estimated under a walk-forward, causal scheme using a two-part hurdle GAM from SaprolengiaInfections24_25.csv. The script used to calculate the estimates and combine the data is walkforward_hurdleGAM_label_estimation.py.
 
 **Scripts**
 - `aggregate-water-features-daily.py` Computes daily means for all features (10-min raw to daily), except bottom turbidity which shows circadian variation. Bottom turbidity is aggregated into mean night, morning, afternoon, and evening. Timezone: Europe/Helsinki. Missing daily values from 
 incomplete day bins were imputed using a multivariate iterative imputer. The algorithm used chained regression (Bayesian Ridge by default) 
 with 20 iterations and random seed = 0. Versions used: pandas 2.3.1, numpy 2.2.5, and scikit-learn 1.7.1.
+- 'walkforward_hurdleGAM_label_estimation.py'estimates daily Saprolegnia infection density and occurrence probability using a causal, walk-forward hurdle Generalized Additive Model (GAM). It reconstructs missing infection records by combining logistic and Gamma components, applies uncertainty propagation and detection-limit filtering, and produces both labeled data and publication-ready figures.
  
