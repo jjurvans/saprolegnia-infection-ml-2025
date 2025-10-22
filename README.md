@@ -9,8 +9,6 @@
 - `SaprolegniaInfection_LabeledData_2025.csv` combines the feature data from WaterAnalysisAggregatedData.csv and daily infection density (visibly infected fish per pool volume) estimated under a walk-forward, causal scheme using a two-part hurdle GAM from SaprolengiaInfections24_25.csv. The script used to calculate the estimates and combine the data is walkforward_hurdleGAM_label_estimation.py.
 
 **Scripts**
-- `aggregate-water-features-daily.py` Computes daily means for all features (10-min raw to daily), except bottom turbidity which shows circadian variation. Bottom turbidity is aggregated into mean night, morning, afternoon, and evening. Timezone: Europe/Helsinki. Missing daily values from 
-incomplete day bins were imputed using a multivariate iterative imputer. The algorithm used chained regression (Bayesian Ridge by default) 
-with 20 iterations and random seed = 0. Versions used: pandas 2.3.1, numpy 2.2.5, and scikit-learn 1.7.1.
+- `aggregate-water-features-daily.py` Computes daily means for all features (10-min raw to daily), except bottom turbidity which shows circadian variation. Bottom turbidity is aggregated into mean night, morning, afternoon, and evening. Missing daily values from incomplete day bins were imputed using a multivariate iterative imputer. The algorithm used chained regression (Bayesian Ridge by default) with 20 iterations and random seed = 0. Versions used: pandas 2.3.1, numpy 2.2.5, and scikit-learn 1.7.1.
 - `walkforward_hurdleGAM_label_estimation.py` estimates daily Saprolegnia infection density and occurrence probability using a causal, walk-forward hurdle Generalized Additive Model (GAM). It reconstructs missing infection records by combining logistic and Gamma components, applies uncertainty propagation and detection-limit filtering, and produces SaprolegniaInfection_LabeledData_2025.csv and figures infection_density_timeseries and soft_label_timeseries.
  
