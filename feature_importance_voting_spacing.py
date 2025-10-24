@@ -24,18 +24,21 @@ Runs under both hard/soft tasks, with and without weights. Uses 3-fold time-seri
 -Feature importance extraction: Retrieves native feature importances (Gini/gain).
 Normalizes per model to [0, 1]. Aggregates across folds and scenarios.
 -Feature ranking & spacing:
-Ranks by mean importance and majority votes across folds. Enforces ±15-day spacing across 
-lag/rolling families for each base variable.
--Visualization: Builds normalized heatmaps showing relative importance across models/scenarios.
+Ranks by mean importance and majority votes across folds. Enforces ±14-day spacing 
+within each family (lag / rolling mean / rolling std) for the same base variable.
+-Visualization: Builds normalized heatmaps showing relative importance across models/scenarios,
+Generates box plot for global stability by Jaccards and Kendalls. 
 
 Outputs
 -------
 - features/topK_{task}_{weighted}_fold{fold}_K{K}.csv
 - features/topK_global_majority_K{K}.csv
-- feature_votes_heatmap_majority_top50_normalized_UNspaced.png
-- feature_votes_heatmap_majority_top50_normalized_SPACED.png
+- figs/feature_votes_heatmap_majority_top50_normalized_UNspaced.png
+- figs/feature_votes_heatmap_majority_top50_normalized_SPACED.png
 - heatmap_data_majority_top50_normalized_UNspaced.csv
-- heatmap_data_majority_top50_normalized_SPACED.csv
+- heatmap_data_majority_top50_normalized_spaced.csv
+- stability_global_long.csv
+- global_stability_boxplots.png
 """
 
 import os, re, random, warnings
@@ -45,6 +48,8 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
+from itertools import combinations
+from scipy.stats import kendalltau
 from sklearn.model_selection import TimeSeriesSplit
 from sklearn.impute import SimpleImputer
 from sklearn.pipeline import make_pipeline
@@ -57,9 +62,10 @@ CSV = "SaprolegniaInfection_LabeledData_2025.csv"
 MAX_LAG = 28
 K_GRID = list(range(10, 51, 5))   # 10..50 step 5
 N_OUTER = 3
-FAMILY_SPACING = 15               # ±14-day exclusion across lag/mean/std for same base var
-DPI = 240
+FAMILY_SPACING = 14               # ±day exclusion across lag/mean/std for same base var
+DPI = 300
 SEED = 42
+K_POOL = 100
 
 SCENARIOS = [
     ("soft", False),  # (task, weighted)
@@ -197,38 +203,56 @@ def fit_with_guard(pipe, X, y, sample_weight, task):
 # ----------------- Spacing helpers -----------------
 _FEAT_RX = re.compile(r"^(?P<base>.+?)_(?P<family>lag|roll_mean|roll_std)(?P<day>\d+)$")
 
-def parse_family_day(feat: str):
+def parse_family_day(feat):
+    """Return (family, day:int, base) or (None,None,None) if not a parsable temporal feature."""
+    if not isinstance(feat, str):
+        return None, None, None
     m = _FEAT_RX.match(feat)
     if not m:
         return None, None, None
     return m.group("family"), int(m.group("day")), m.group("base")
 
-def select_topK_spaced_across_families(ranked_features, K, spacing=15, relax_if_needed=True):
+def select_topK_spaced_within_families(ranked_features, K, spacing=14, relax_if_needed=True):
     """
-    Greedy spacing ACROSS families (lag / roll_mean / roll_std) for same base variable.
-    Once (base, day) is chosen, forbid any other with same base and |day - day'| < spacing.
+    Greedy spacing WITHIN families (lag / roll_mean / roll_std) for the SAME base variable.
+    After selecting (base, family, day), forbid any other feature with the SAME (base, family)
+    whose |day - day'| < spacing. Different families for the same base do NOT block each other.
     """
     selected = []
-    used_days_by_base = defaultdict(list)
+    used_days_by_key = defaultdict(list)  # key = (base, family) -> list of chosen days
+
+    # first pass (strict)
     for f in ranked_features:
         if len(selected) >= K:
             break
         fam, day, base = parse_family_day(f)
-        if base is None or day is None:
-            selected.append(f); continue
-        if all(abs(day - d) >= spacing for d in used_days_by_base[base]):
-            selected.append(f); used_days_by_base[base].append(day)
+        if base is None or day is None or fam is None:
+            selected.append(f)
+            continue
+        key = (base, fam)
+        if all(abs(day - d) >= spacing for d in used_days_by_key[key]):
+            selected.append(f)
+            used_days_by_key[key].append(day)
+
     if len(selected) >= K or not relax_if_needed:
         return selected[:K]
+
+    # relaxation pass (fill up to K while preserving within-family spacing)
     used = set(selected)
     for f in ranked_features:
-        if len(selected) >= K: break
-        if f in used: continue
+        if len(selected) >= K:
+            break
+        if f in used:
+            continue
         fam, day, base = parse_family_day(f)
-        if base is None or day is None:
-            selected.append(f); used.add(f); continue
-        if all(abs(day - d) >= spacing for d in used_days_by_base[base]):
-            selected.append(f); used.add(f); used_days_by_base[base].append(day)
+        if base is None or day is None or fam is None:
+            selected.append(f); used.add(f)
+            continue
+        key = (base, fam)
+        if all(abs(day - d) >= spacing for d in used_days_by_key[key]):
+            selected.append(f); used.add(f)
+            used_days_by_key[key].append(day)
+
     return selected[:K]
 
 # ----------------- Load & prepare data -----------------
@@ -273,7 +297,7 @@ scenario_imps = {
     for (task, weighted) in SCENARIOS
 }
 fold_spaced_orders = []
-
+fold_mean_ranks = []
 for fold, (tr_idx, te_idx) in enumerate(outer.split(X_all)):
     Xtr = X_all.iloc[tr_idx]
     agg_imps_df = pd.DataFrame(0.0, index=Xtr.columns, columns=MODEL_NAMES)
@@ -310,8 +334,9 @@ for fold, (tr_idx, te_idx) in enumerate(outer.split(X_all)):
     ranked_features = list(mean_rank.index)
 
     # Spaced order for this fold (used later for majority voting)
-    spaced_order = select_topK_spaced_across_families(ranked_features, K=max(K_GRID),
+    spaced_order = select_topK_spaced_within_families(ranked_features, K=K_POOL,
                                                       spacing=FAMILY_SPACING, relax_if_needed=True)
+    fold_mean_ranks.append(ranks.mean(axis=1))
     fold_spaced_orders.append(spaced_order)
 
     # Save per-scenario Top-K feature lists for this fold (same spaced order used for all scenarios)
@@ -321,7 +346,7 @@ for fold, (tr_idx, te_idx) in enumerate(outer.split(X_all)):
             out_fp = f"features/topK_{task}_{int(weighted)}_fold{fold}_K{K}.csv"
             pd.DataFrame({"feature": topK}).to_csv(out_fp, index=False)
 
-# ----------------- Build per-scenario importance table -----------------
+# ----------------- Build per-scenario importance table (fresh, no cache) -----------------
 def label(task, weighted, model):
     return f"{model}_{task}_{'w' if weighted else 'nw'}"
 
@@ -350,15 +375,15 @@ for c in COLS_ORDER:
     if mx > 0:
         norm[c] = norm[c] / mx
 
-# Save the avaraged importances
+# Optionally persist raw averaged per-scenario columns (not used in this run)
 for c in COLS_ORDER:
-    pd.DataFrame({c: wide[c]}).to_csv(f"importance_{c}.csv") 
+    pd.DataFrame({c: wide[c]}).to_csv(f"importance_{c}.csv")  # raw, not reloaded here
 
 # ----------------- Majority voting across folds -----------------
-maxK = min(max(K_GRID), min(len(lst) for lst in fold_spaced_orders))
 votes_all = Counter()
 for spaced in fold_spaced_orders:
-    votes_all.update(spaced[:maxK])
+    votes_all.update(spaced[:K_POOL])
+print("[diag] spaced lengths per fold:", [len(lst) for lst in fold_spaced_orders])
 
 # Tie-breaker: global mean normalized importance (higher better)
 mean_importance = norm.mean(axis=1)
@@ -370,7 +395,7 @@ ranked_by_votes = sorted(
 
 # Save global Top-K lists with spacing enforced
 for K in K_GRID:
-    global_spaced = select_topK_spaced_across_families(
+    global_spaced = select_topK_spaced_within_families(
         ranked_by_votes, K=K, spacing=FAMILY_SPACING, relax_if_needed=True
     )
     out_fp = f"features/topK_global_majority_K{K}.csv"
@@ -378,33 +403,49 @@ for K in K_GRID:
     print(f"[OK] Saved majority-vote global Top-{K}: {out_fp}")
 
 # ----------------- Heatmaps -----------------
-def _plot_heatmap(df_sub, cols, title, csv_path, png_path):
-    df_sub.to_csv(csv_path, index=True); print(f"[OK] Saved CSV: {csv_path}")
+def _plot_heatmap(df_sub, cols, y_label, csv_path, png_path):
+    # Save CSV used in the plot
+    df_sub.to_csv(csv_path, index=True)
+    print(f"[OK] Saved CSV: {csv_path}")
+
     if df_sub.empty:
-        print(f"[WARN] Empty heatmap for '{title}'. Skipping.")
+        print(f"[WARN] Empty heatmap for y-axis '{y_label}'. Skipping.")
         return
+
     mat = df_sub[cols].to_numpy()
     fig, ax = plt.subplots(figsize=(14, max(6, 0.35 * len(df_sub))))
-    im = ax.imshow(mat, aspect="auto", vmin=0, vmax=1)
-    ax.set_yticks(np.arange(len(df_sub))); ax.set_yticklabels(df_sub.index)
-    ax.set_xticks(np.arange(len(cols))); ax.set_xticklabels(cols, rotation=30, ha="right")
-    ax.set_xlabel("Model–scenario combination"); ax.set_ylabel("Feature (alphabetical, Top 50)")
-    ax.set_title(title)
-    cbar = plt.colorbar(im, ax=ax); cbar.set_label("Normalized importance (0–1)")
-    fig.tight_layout(); fig.savefig(png_path, dpi=DPI); plt.close(fig)
+
+    # Half-width color range around 0.5 (0.25–0.75) for better contrast
+    im = ax.imshow(mat, aspect="auto", vmin=0.25, vmax=0.75)
+
+    ax.set_yticks(np.arange(len(df_sub)))
+    ax.set_yticklabels(df_sub.index)
+    ax.set_xticks(np.arange(len(cols)))
+    ax.set_xticklabels(cols, rotation=30, ha="right")
+    ax.set_xlabel("Model–scenario combination")
+    ax.set_ylabel(y_label)  # custom y-axis label; no title
+
+    cbar = plt.colorbar(im, ax=ax)
+    cbar.set_label("Normalized importance (0–1)")
+
+    fig.tight_layout()
+    fig.savefig(png_path, dpi=DPI)
+    plt.close(fig)
     print(f"[OK] Saved heatmap: {png_path}")
 
+# --- Unspaced Top-50
 top50_unspaced_feats = sorted(ranked_by_votes[:50])  # alphabetical for display
 top50_unspaced = norm.reindex(top50_unspaced_feats).fillna(0.0)
 _plot_heatmap(
     df_sub=top50_unspaced[COLS_ORDER],
     cols=COLS_ORDER,
-    title="Feature votes heatmap — Top 50 by votes (no spacing), normalized",
+    y_label="Top 50 labels unspaced",
     csv_path="heatmap_data_majority_top50_normalized_UNspaced.csv",
     png_path="figs/feature_votes_heatmap_majority_top50_normalized_UNspaced.png"
 )
 
-spaced_top50_list = select_topK_spaced_across_families(
+# --- Spaced Top-50
+spaced_top50_list = select_topK_spaced_within_families(
     ranked_by_votes, K=50, spacing=FAMILY_SPACING, relax_if_needed=True
 )
 top50_spaced_feats = sorted(spaced_top50_list)
@@ -412,9 +453,92 @@ top50_spaced = norm.reindex(top50_spaced_feats).fillna(0.0)
 _plot_heatmap(
     df_sub=top50_spaced[COLS_ORDER],
     cols=COLS_ORDER,
-    title=f"Feature votes heatmap — Top 50 WITH {FAMILY_SPACING}-day spacing, normalized",
+    y_label="Top 50 labels spaced",
     csv_path="heatmap_data_majority_top50_normalized_SPACED.csv",
     png_path="figs/feature_votes_heatmap_majority_top50_normalized_SPACED.png"
 )
+# ----- Global stability across outer folds (Jaccard & Kendall) + box-plots -----
+
+# Clamp K so all folds have at least K spaced features
+if len(fold_spaced_orders) >= 2:
+    maxK = min(max(K_GRID), min(len(lst) for lst in fold_spaced_orders))
+    K_eff = [K for K in K_GRID if K <= maxK]
+else:
+    K_eff = []
+
+def _pairwise_jaccards(list_of_sets):
+    vals = []
+    for a, b in combinations(list_of_sets, 2):
+        u = len(a | b); i = len(a & b)
+        vals.append(i / u if u > 0 else 1.0)
+    return np.asarray(vals, float)
+
+def _pairwise_kendalls(rank_series_list, idx):
+    vals = []
+    fillv = len(idx) + 1
+    for a, b in combinations(rank_series_list, 2):
+        r1 = a.reindex(idx).fillna(fillv).to_numpy()
+        r2 = b.reindex(idx).fillna(fillv).to_numpy()
+        tau, _ = kendalltau(r1, r2, nan_policy="omit")
+        vals.append(tau)
+    return np.asarray(vals, float)
+
+stability_long = []
+if len(K_eff) > 0:
+    for K in K_eff:
+        # Jaccard on Top-K sets from each fold
+        sets_K = [set(lst[:K]) for lst in fold_spaced_orders]
+        j_vals = _pairwise_jaccards(sets_K)
+
+        # Kendall on ranks restricted to union of Top-K across folds
+        union_topK = sorted(set().union(*sets_K))
+        idx_use = pd.Index(union_topK) if union_topK else pd.Index([])
+        t_vals = _pairwise_kendalls(fold_mean_ranks, idx_use) if len(idx_use) > 0 else np.array([])
+
+        for v in j_vals:
+            stability_long.append(dict(metric="Jaccard", K=K, value=float(v)))
+        for v in t_vals:
+            stability_long.append(dict(metric="KendallTau", K=K, value=float(v)))
+
+stab_long_df = pd.DataFrame(stability_long)
+stab_long_df.to_csv("stability_global_long.csv", index=False)
+print("[OK] Saved stability_global_long.csv")
+
+# ----- Box-plots by metric (global, not per-scenario) -----
+if not stab_long_df.empty:
+    os.makedirs("figs", exist_ok=True)
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+
+    # Left: Jaccard
+    j = stab_long_df[stab_long_df.metric == "Jaccard"]
+    axes[0].boxplot(
+        [j[j.K == K]["value"].to_numpy() for K in K_eff],
+        tick_labels=[str(K) for K in K_eff],  # <- renamed
+        showmeans=True
+        ) 
+    axes[0].set_title("Jaccard (pairwise across outer folds)")
+    axes[0].set_xlabel("Top-K"); axes[0].set_ylabel("Jaccard index"); axes[0].grid(alpha=0.3)
+
+    # Right: Kendall τ
+    k = stab_long_df[stab_long_df.metric == "KendallTau"]
+    if k.empty:
+        axes[1].text(0.5, 0.5, "Kendall τ not available", ha="center", va="center", transform=axes[1].transAxes)
+        axes[1].axis("off")
+    else:
+        axes[1].boxplot(
+            [k[k.K == K]["value"].to_numpy() for K in K_eff],
+            tick_labels=[str(K) for K in K_eff],  # <- renamed
+            showmeans=True
+            )  
+        axes[1].set_title("Kendall τ (pairwise across outer folds)")
+        axes[1].set_xlabel("Top-K"); axes[1].set_ylabel("Kendall τ"); axes[1].grid(alpha=0.3)
+
+    fig.suptitle("Global selection stability across outer folds")
+    fig.tight_layout()
+    fig.savefig("figs/global_stability_boxplots.png", dpi=DPI)
+    plt.close(fig)
+    print("[OK] Saved figs/global_stability_boxplots.png")
+else:
+    print("[WARN] Not enough folds or K values for stability.")
 
 print("[DONE] Global Top-K CSVs and heatmaps created.")
