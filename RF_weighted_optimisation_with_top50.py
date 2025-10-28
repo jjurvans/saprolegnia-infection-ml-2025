@@ -71,15 +71,15 @@ DBI_F = 300
 # ------------------------------ RF Grid (wide, deterministic) ------------------------------
 
 RF_GRID_HARD = {
-    "rf__n_estimators":      [400, 600, 800, 1000],
-    "rf__max_depth":         [3, 4, 6, 8, None],
-    "rf__min_samples_leaf":  [2, 4, 6, 10],
-    "rf__min_samples_split": [2, 4],
-    "rf__max_features":      ["sqrt", 0.5],
+    "rf__n_estimators":      [400, 600, 800, 1000, 1200],
+    "rf__max_depth":         [2, 3, 4, 5, 6],
+    "rf__min_samples_leaf":  [2, 3, 4, 5, 6],
+    "rf__min_samples_split": [2, 3, 4],
+    "rf__max_features":      [0.5,"sqrt"],
     "rf__bootstrap":         [True],
-    "rf__max_samples":       [None, 0.8],
+    "rf__max_samples":       [None],
     "rf__criterion":         ["gini", "log_loss"],
-    "rf__class_weight":      [None, "balanced"],
+    "rf__class_weight":      [None],
     "rf__min_impurity_decrease": [0.0],
     "rf__ccp_alpha":         [0.0],
 }
@@ -193,12 +193,9 @@ X_sel = X_all[selected_features].copy()
 
 # ------------------------------ Base Estimator & Pipeline ------------------------------
 rf_base = RandomForestClassifier(
-    n_estimators=700,  # will be overridden by grid
-    max_depth=None,
-    min_samples_leaf=2,
     bootstrap=True,
     random_state=SEED,
-    n_jobs=1
+    n_jobs=-1
 )
 pipe = Pipeline([("imputer", SimpleImputer(strategy="median")),
                  ("rf", rf_base)])
