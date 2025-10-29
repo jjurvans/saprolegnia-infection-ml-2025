@@ -58,4 +58,4 @@
 
 ### **Note**
 
-The original script was generated with assistance from ChatGPT (OpenAI) and has been subsequently reviewed, modified, and tested by the repository author.
+The original scripts were generated with assistance from ChatGPT (OpenAI) and has been subsequently reviewed, modified, and tested by the repository author.
