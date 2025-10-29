@@ -1,18 +1,73 @@
 # saprolegnia-infection-ml-2025
-**Data and machine learning models for studying *Saprolegnia* infection dynamics in Enonkoski fish farm, Finland (2024–2025).**
+
+**Data and machine learning models for studying *Saprolegnia* infection dynamics in the Enonkoski fish farm, Finland (2024–2025).**
+
+---
 
 ## Repository structure
-**Data**
-- `WaterAnalysisRawData.csv` contains 10-minute interval water quality data collected from Enonkoski fish farm surface and bottom layers between March 2024 and August 2025. Parameters include temperature, pH, pH-mV, dissolved oxygen, UV254 (filtered and total), nitrate (NO₃eq, NO₃_Neq), and turbidity. 
-- `WaterAnalysisAggregatedData.csv` is daily mean of all the features from WaterAnalysisRawData.csv except bottom turbidity. Bottom turbidity has statistically significant circadian differences and was thus divided into morning, afternoon, evening and night mean values. The script used is aggregate-water-features-daily.py.
-- `SaprolengiaInfections24_25.csv` fish farm data on timestamped data on fish removal due to extensive saprolengia mold or death due to the saprolengia. Columns are fish species, explanation ("saprolengia" or "other" for working days when no saprolengia was visible), quantity of all fish in a pool, number of removed fish due to saprolengia, pool volume, and timestamp.
-- `SaprolegniaInfection_LabeledData_2025.csv` combines the feature data from WaterAnalysisAggregatedData.csv and daily infection density (visibly infected fish per pool volume) estimated under a walk-forward, causal scheme using a two-part hurdle GAM from SaprolengiaInfections24_25.csv. The script used to calculate the estimates and combine the data is walkforward_hurdleGAM_label_estimation.py.
-- `topK_global_majority_K50.csv` the 50 best lagged and rolled mean and standard deviation features selected with the evaluate_topk_temporal_features.py.
 
-**Scripts**
-- `aggregate-water-features-daily.py` Computes daily means for all features (10-min raw to daily), except bottom turbidity which shows circadian variation. Bottom turbidity is aggregated into mean night, morning, afternoon, and evening. Missing daily values from incomplete day bins were imputed using a multivariate iterative imputer.
-- `walkforward_hurdleGAM_label_estimation.py` estimates daily Saprolegnia infection density and occurrence probability using a causal, walk-forward hurdle Generalized Additive Model (GAM). It reconstructs missing infection records by combining logistic and Gamma components, applies uncertainty propagation and detection-limit filtering, and produces SaprolegniaInfection_LabeledData_2025.csv and figures infection_density_timeseries and soft_label_timeseries.
-- `feature_importance_voting_spacing.py` selects predictive time-lagged features from SaprolegniaInfection_LabeledData_2025.csv using Random Forest, LightGBM, and XGBoost. It builds 1–28-day lag and rolling features, applies a 14-day within-family spacing rule to avoid redundancy, and identifies the most stable predictors across time-series folds using model-averaged importances and stability metrics.
-- `evaluate_topk_temporal_features.py` valuate Top-K temporal feature sets from feature_importance_voting_spacing.py with time-series cross-validation using ensemble models (RF, LGBM, XGB). Produces baseline metrics and comparative Brier/LogLoss performance plots under weighted and unweighted evaluation schemes.
-- `RF_weighted_optimisation_with_top50.py` Random Forest model optimization on SaprolegniaInfection_LabeledData_2025.csv with topK_global_majority_K50.csv, using weighted hard-label classification and inverse-variance weighting.The script performs nested time-series cross-validation with a broad deterministic hyperparameter grid, evaluates against constant and persistence (t−1) baselines, and reports probabilistic performance metrics (Brier, LogLoss, ROC-AUC, PR-AUC) with diagnostic plots.
-- `saprolegnia-rf-pipeline.py` builds lagged and rolling time-series features from SaprolegniaInfection_LabeledData_2025.csv, applies inverse-variance weighting, retains selected predictors from topK_global_majority_K50.csv, and fits a calibrated Random Forest model. It produces SHAP-based interpretability plots, block permutation importance analyses, and calibrated infection probability forecasts using TestData.csv and NewInfectionDensity.csv.
+### **Data**
+
+- **`WaterAnalysisRawData.csv`**  
+  Contains 10-minute interval water-quality data collected from the surface and bottom layers of the Enonkoski fish farm between March 2024 and August 2025.  
+  Parameters include temperature, pH, pH-mV, dissolved oxygen, UV254 (filtered and total), nitrate (NO₃eq, NO₃_Neq), and turbidity.
+
+- **`WaterAnalysisAggregatedData.csv`**  
+  Provides daily means of all features from `WaterAnalysisRawData.csv`, except for bottom turbidity.  
+  Bottom turbidity shows statistically significant circadian variation and was therefore divided into morning, afternoon, evening, and night means.  
+  Missing daily values from incomplete day bins were imputed using a multivariate iterative imputer.  
+  *Script used:* `aggregate-water-features-daily.py`
+
+- **`SaprolengiaInfections24_25.csv`**  
+  Contains timestamped data on fish removal due to extensive *Saprolegnia* mould infection or mortality caused by *Saprolegnia*.  
+  Columns include fish species, explanation (“saprolengia” or “other” for working days when no *Saprolegnia* was visible), total fish per pool, number of fish removed due to *Saprolegnia*, pool volume, and timestamp.
+
+- **`SaprolegniaInfection_LabeledData_2025.csv`**  
+  Combines feature data from `WaterAnalysisAggregatedData.csv` with daily infection density (visibly infected fish per pool volume) estimated under a walk-forward, causal scheme using a two-part hurdle Generalised Additive Model (GAM) derived from `SaprolengiaInfections24_25.csv`.  
+  *Script used:* `walkforward_hurdleGAM_label_estimation.py`
+
+- **`topK_global_majority_K50.csv`**  
+  Lists the 50 most predictive lagged, rolling mean, and standard deviation features selected using `evaluate_topk_temporal_features.py`.
+
+- **`TestData.csv`**  
+  Contains water-quality data from September–October 2025, which were not used in the development of the Random Forest model.
+
+- **`NewInfectionDensity.csv`**  
+  Provides infection density data from September–October 2025, not used during model development.
+
+---
+
+### **Scripts**
+
+- **`aggregate-water-features-daily.py`**  
+  Computes daily means for all features (10-minute raw to daily), except bottom turbidity, which shows circadian variation.  
+  Bottom turbidity is aggregated into mean night, morning, afternoon, and evening values.  
+  Missing daily values from incomplete bins are imputed using a multivariate iterative imputer.
+
+- **`walkforward_hurdleGAM_label_estimation.py`**  
+  Estimates daily *Saprolegnia* infection density and occurrence probability using a causal, walk-forward hurdle Generalised Additive Model (GAM).  
+  Reconstructs missing infection records by combining logistic and Gamma components, applies uncertainty propagation and detection-limit filtering, and produces `SaprolegniaInfection_LabeledData_2025.csv` together with figures `infection_density_timeseries` and `soft_label_timeseries`.
+
+- **`feature_importance_voting_spacing.py`**  
+  Selects predictive time-lagged features from `SaprolegniaInfection_LabeledData_2025.csv` using Random Forest, LightGBM, and XGBoost.  
+  Builds 1–28-day lag and rolling features, applies a 14-day within-family spacing rule to avoid redundancy, and identifies the most stable predictors across time-series folds using model-averaged importances and stability metrics.
+
+- **`evaluate_topk_temporal_features.py`**  
+  Evaluates Top-K temporal feature sets from `feature_importance_voting_spacing.py` using time-series cross-validation with ensemble models (RF, LGBM, XGB).  
+  Produces baseline metrics and comparative Brier/Log-Loss performance plots under weighted and unweighted evaluation schemes.
+
+- **`RF_weighted_optimisation_with_top50.py`**  
+  Performs Random Forest model optimisation on `SaprolegniaInfection_LabeledData_2025.csv` with `topK_global_majority_K50.csv`, using weighted hard-label classification and inverse-variance weighting.  
+  Conducts nested time-series cross-validation with a broad deterministic hyperparameter grid, evaluates against constant and persistence (t−1) baselines, and reports probabilistic performance metrics (Brier, Log-Loss, ROC-AUC, PR-AUC) with diagnostic plots.
+
+- **`saprolegnia-rf-pipeline.py`**  
+  Generates lagged and rolling time-series features from `SaprolegniaInfection_LabeledData_2025.csv`, applies inverse-variance weighting, retains the selected predictors from `topK_global_majority_K50.csv`, and fits a calibrated Random Forest model.  
+  Produces SHAP-based interpretability plots, block permutation importance analyses, and calibrated infection-probability forecasts using `TestData.csv` and `NewInfectionDensity.csv`.
+
+---
+
+### **Note**
+
+> The original script was generated with assistance from **ChatGPT (OpenAI)** and has been subsequently **reviewed, modified, and tested by the repository author**.
+
+---
