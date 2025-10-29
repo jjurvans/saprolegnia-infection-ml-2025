@@ -1,6 +1,9 @@
 # saprolegnia-infection-ml-2025
 
-**Data and machine learning models for studying *Saprolegnia* infection dynamics in the Enonkoski fish farm, Finland (2024–2025).**
+**Data and machine learning models for a Random Forest model predicting *Saprolegnia* infection from water-quality features.**
+
+<img width="1633" height="909" alt="image" src="https://github.com/user-attachments/assets/8ab78ebe-6109-41b3-b4ee-ddf63324a4fa" />
+
 
 ---
 
