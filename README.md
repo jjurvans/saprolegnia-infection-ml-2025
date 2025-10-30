@@ -55,6 +55,10 @@
   Generates lagged and rolling time-series features from `SaprolegniaInfection_LabeledData_2025.csv`, applies inverse-variance weighting, retains the selected predictors from `topK_global_majority_K50.csv`, and fits a calibrated Random Forest model. Produces SHAP-based interpretability plots, block permutation importance analyses, and calibrated infection-probability forecasts using `TestData.csv` and `NewInfectionDensity.csv`.
 
 ---
+## Contact
+
+This repository is maintained by Jaana Jurvansuu, PhD, Docent (Adjunct Professor) and AIvoa — Applied AI and Modelling for Biological Sciences.  
+For collaboration or implementation enquiries, please connect via [LinkedIn](https://www.linkedin.com/in/jaanajurvansuu/).
 
 ### **Note**
 
