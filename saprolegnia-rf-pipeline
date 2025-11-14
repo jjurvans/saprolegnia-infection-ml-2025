@@ -457,7 +457,7 @@ def run_final_rf_with_df(
                 raise FileNotFoundError(f"df_new file not found: {df_new}")
                 # try to parse Timestamp if present
             try:
-                df_new = pd.read_csv(df_new, parse_dates=["Timestamp"])
+                df_new = pd.read_csv(df_new, sep=';', parse_dates=["Timestamp"])
             except Exception:
                 df_new = pd.read_csv(df_new)
 
